@@ -2,14 +2,17 @@
 folder into the destination album directory, renamed to the "<category>-NN"
 convention (matching the Cover Art Archive type vocabulary: front, back,
 booklet, medium, tray, spine, liner, sticker, poster, obi, watermark, other)
-that Roon reads directly from the folder. Supplements that folder with any
-images from the matched release's MusicBrainz Cover Art Archive listing
-that aren't already covered locally (exact byte-size duplicates within the
-same category are skipped); those are named "CAA-<category>-NN" with their
-own independent per-category numbering, so they're never confused with
-locally-sourced art. If there's no local Artwork/ folder at all, CAA
-becomes the sole source instead of being skipped. Also writes a VERSION
-tag ("{media} | {edition}") and a $formatcode path template field.
+that Roon reads directly from the folder. Supplements that folder with
+images from the matched release's MusicBrainz Cover Art Archive listing:
+for a category with zero local coverage, CAA becomes the canonical source
+and gets the plain "<category>-NN" name (so e.g. front-01 reliably exists
+even when local filenames give no usable signal -- generic "image_NN.jpg"
+scans, etc. -- with no manual review needed); for a category that already
+has local images, CAA only supplements it and gets "CAA-<category>-NN"
+with its own independent numbering, so it's never confused with
+locally-sourced art. Exact byte-size duplicates within the same category
+are skipped. Also writes a VERSION tag ("{media} | {edition}") and a
+$formatcode path template field.
 
 List this plugin AFTER `scrub` in the plugins config: scrub's automatic
 restore step re-embeds any art that was present in the source file, so
@@ -27,6 +30,10 @@ from beets.plugins import BeetsPlugin
 from beets.util import bytestring_path, displayable_path, syspath
 
 IMAGE_EXTENSIONS = {b'jpg', b'jpeg', b'png', b'webp'}
+
+# Source subdirectory names (case-insensitive) recognized as holding
+# artwork to process, beyond the canonical "Artwork".
+ARTWORK_DIR_NAMES = {'artwork', 'scans', 'scan', 'covers', 'cover', 'images'}
 
 CAA_URL = 'https://coverartarchive.org/release/{}'
 CAA_USER_AGENT = 'beets-roon-artwork/0.1 ( local beets plugin, no contact )'
@@ -150,7 +157,7 @@ class RoonArtworkPlugin(BeetsPlugin):
             if not os.path.isdir(syspath(path)):
                 continue
             for entry in os.listdir(syspath(path)):
-                if entry.lower() == 'artwork':
+                if entry.lower() in ARTWORK_DIR_NAMES:
                     candidate = os.path.join(path, bytestring_path(entry))
                     if os.path.isdir(syspath(candidate)):
                         return candidate
@@ -204,9 +211,16 @@ class RoonArtworkPlugin(BeetsPlugin):
                 )
 
         if self.config['fetch_caa_art'].get(bool):
-            self._add_caa_art(task, dest_artwork, sizes_by_category)
+            self._add_caa_art(task, dest_artwork, counters, sizes_by_category)
 
-    def _add_caa_art(self, task, dest_artwork, sizes_by_category):
+    def _add_caa_art(self, task, dest_artwork, counters, sizes_by_category):
+        # Categories with zero local coverage: CAA becomes the canonical
+        # (unprefixed) source for these, so e.g. front-01 reliably exists
+        # even when local filenames give no usable signal (generic
+        # "image_NN.jpg" scans, etc.) -- no visual review required. When a
+        # category already has local coverage, CAA images only supplement
+        # it and get the CAA- prefix to stay distinguishable.
+        locally_covered = set(counters)
         mbid = task.items[0].get('mb_albumid') if task.items else None
         if not mbid:
             return
@@ -261,8 +275,14 @@ class RoonArtworkPlugin(BeetsPlugin):
                 os.makedirs(syspath(dest_artwork), exist_ok=True)
                 made_dir = True
 
-            caa_counters[category] = caa_counters.get(category, 0) + 1
-            new_name = f'CAA-{category}-{caa_counters[category]:02d}.'.encode() + ext
+            if category in locally_covered:
+                caa_counters[category] = caa_counters.get(category, 0) + 1
+                new_name = (
+                    f'CAA-{category}-{caa_counters[category]:02d}.'.encode() + ext
+                )
+            else:
+                counters[category] = counters.get(category, 0) + 1
+                new_name = f'{category}-{counters[category]:02d}.'.encode() + ext
             dst = os.path.join(dest_artwork, new_name)
             with open(syspath(dst), 'wb') as f:
                 f.write(content)
