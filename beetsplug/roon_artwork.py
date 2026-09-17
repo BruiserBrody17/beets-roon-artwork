@@ -1,8 +1,12 @@
-"""Strips embedded artwork from FLAC files and copies a source `Artwork/`
-folder into the destination album directory, renamed to the "<category>-NN"
-convention (matching the Cover Art Archive type vocabulary: front, back,
-booklet, medium, tray, spine, liner, sticker, poster, obi, watermark, other)
-that Roon reads directly from the folder. Supplements that folder with
+"""Strips embedded artwork from FLAC files and copies source art (an
+`Artwork`/`scans`/etc. folder, or failing that a lone loose image file
+alongside the tracks) into the destination album directory, renamed to
+the "<category>-NN" convention (matching the Cover Art Archive type
+vocabulary: front, back, booklet, medium, tray, spine, liner, sticker,
+poster, obi, watermark, other) that Roon reads directly from the folder.
+A single unlabeled loose image (cover.jpg, folder.jpg, or any other
+name) is treated as the front cover, per near-universal ripping
+convention. Supplements that folder with
 images from the matched release's MusicBrainz Cover Art Archive listing:
 for a category with zero local coverage, CAA becomes the canonical source
 and gets the plain "<category>-NN" name (so e.g. front-01 reliably exists
@@ -83,7 +87,10 @@ def format_code(item):
 KEYWORD_CATEGORIES = [
     ('booklet', 'booklet'),
     ('inside', 'booklet'),
+    ('page', 'booklet'),
     ('front', 'front'),
+    ('cover', 'front'),
+    ('folder', 'front'),
     ('back', 'back'),
     ('medium', 'medium'),
     ('disc', 'medium'),
@@ -163,6 +170,29 @@ class RoonArtworkPlugin(BeetsPlugin):
                         return candidate
         return None
 
+    def _find_loose_root_images(self, task):
+        """Image files directly in the album's source directory, for
+        albums with no Artwork/scans/etc. subfolder at all -- just a lone
+        cover.jpg/folder.jpg/whatever alongside the tracks. Returns
+        (source_dir, [filenames]) or (None, [])."""
+        if not task.paths:
+            return None, []
+        for path in task.paths:
+            if not os.path.isdir(syspath(path)):
+                continue
+            images = []
+            for entry in sorted(os.listdir(syspath(path))):
+                fn = bytestring_path(entry)
+                if b'.' not in fn:
+                    continue
+                ext = fn.rsplit(b'.', 1)[-1].lower()
+                full = os.path.join(path, fn)
+                if ext in IMAGE_EXTENSIONS and os.path.isfile(syspath(full)):
+                    images.append(fn)
+            if images:
+                return path, images
+        return None, []
+
     def build_artwork_folder(self, task):
         album = getattr(task, 'album', None)
         try:
@@ -181,6 +211,7 @@ class RoonArtworkPlugin(BeetsPlugin):
         sizes_by_category = {}
 
         source_artwork = self._find_source_artwork_dir(task)
+        loose_root = source_artwork is None
         if source_artwork is not None:
             images = []
             for fn in sorted(os.listdir(syspath(source_artwork))):
@@ -191,15 +222,29 @@ class RoonArtworkPlugin(BeetsPlugin):
                 full = os.path.join(source_artwork, fn)
                 if ext in IMAGE_EXTENSIONS and os.path.isfile(syspath(full)):
                     images.append(fn)
+            source_dir = source_artwork
+        else:
+            # No Artwork/scans/etc. subfolder -- fall back to whatever
+            # loose image file(s) sit alongside the tracks (cover.jpg,
+            # folder.jpg, or a fully custom name).
+            source_dir, images = self._find_loose_root_images(task)
 
-            if images:
-                os.makedirs(syspath(dest_artwork), exist_ok=True)
-            for fn in images:
-                category = categorize(fn.decode('utf-8', 'replace'))
+        if images:
+            categorized = [
+                (fn, categorize(fn.decode('utf-8', 'replace'))) for fn in images
+            ]
+            if loose_root and all(cat == 'other' for _, cat in categorized):
+                # A single unlabeled image alongside the tracks is, by
+                # near-universal ripping convention, the front cover.
+                fn0, _ = categorized[0]
+                categorized[0] = (fn0, 'front')
+
+            os.makedirs(syspath(dest_artwork), exist_ok=True)
+            for fn, category in categorized:
                 counters[category] = counters.get(category, 0) + 1
                 ext = fn.rsplit(b'.', 1)[-1].lower()
                 new_name = f'{category}-{counters[category]:02d}.'.encode() + ext
-                src = os.path.join(source_artwork, fn)
+                src = os.path.join(source_dir, fn)
                 dst = os.path.join(dest_artwork, new_name)
                 shutil.copyfile(syspath(src), syspath(dst))
                 sizes_by_category.setdefault(category, set()).add(
