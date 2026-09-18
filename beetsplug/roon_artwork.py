@@ -173,6 +173,13 @@ class RoonArtworkPlugin(BeetsPlugin):
         super().__init__()
         self.register_listener('import_task_files', self.handle_task)
         self.register_listener('write', self.write_version_tag)
+        # beet move/modify -m relocates only the files beets actually
+        # tracks as library items -- a plain move leaves the Artwork/
+        # folder behind in the old directory, since it was only ever
+        # built at import time (build_artwork_folder below), not
+        # tracked. Carry it along whenever an already-imported album
+        # gets moved later.
+        self.register_listener('item_moved', self.item_moved)
         self.template_fields['formatcode'] = format_code
         self.template_fields['discprefix'] = disc_prefix
         self.template_fields['distinctdisambig'] = distinct_disambig
@@ -185,6 +192,22 @@ class RoonArtworkPlugin(BeetsPlugin):
     def handle_task(self, task, session):
         self.strip_embedded_art(task)
         self.build_artwork_folder(task)
+
+    def item_moved(self, item, source, destination):
+        source_dir = os.path.dirname(source)
+        dest_dir = os.path.dirname(destination)
+        if source_dir == dest_dir:
+            return
+        old_artwork = os.path.join(source_dir, b'Artwork')
+        new_artwork = os.path.join(dest_dir, b'Artwork')
+        if not os.path.isdir(syspath(old_artwork)):
+            return
+        if os.path.exists(syspath(new_artwork)):
+            return  # already carried along by an earlier item in this album
+        try:
+            shutil.move(syspath(old_artwork), syspath(new_artwork))
+        except OSError as exc:
+            self._log.warning('Could not carry Artwork folder to new location: {0}'.format(exc))
 
     def write_version_tag(self, item, path, tags):
         # originquery prompts (when running interactively, and only when
