@@ -82,6 +82,15 @@ FORMAT_CODES = {
 def format_code(item):
     return FORMAT_CODES.get(item.format, item.format)
 
+
+def disc_prefix(item):
+    # "02-" for track 1 of a 2+ disc release; "" for single-disc albums.
+    # beets' path templates have no native numeric comparison, so this is
+    # computed here rather than with %if{}.
+    if (item.disctotal or 1) > 1:
+        return '%02d-' % item.disc
+    return ''
+
 # Keyword -> canonical category, checked in this order (most specific/
 # aliases first) against the lowercased filename. Anything unmatched
 # falls back to "other".
@@ -119,6 +128,7 @@ class RoonArtworkPlugin(BeetsPlugin):
         self.register_listener('import_task_files', self.handle_task)
         self.register_listener('write', self.write_version_tag)
         self.template_fields['formatcode'] = format_code
+        self.template_fields['discprefix'] = disc_prefix
         self.add_media_field('version', mediafile.MediaField(
             mediafile.MP3DescStorageStyle(desc='VERSION'),
             mediafile.StorageStyle('VERSION'),
