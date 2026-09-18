@@ -91,6 +91,22 @@ def disc_prefix(item):
         return '%02d-' % item.disc
     return ''
 
+
+def distinct_disambig(item):
+    # albumdisambig, but suppressed when it's redundant with the [media]
+    # path segment (e.g. both "SACD") -- beets' path templates have no
+    # native string-equality comparison, so this is computed here rather
+    # than with %if{}.
+    disambig = (item.albumdisambig or '').strip()
+    media = (item.media or '').strip()
+    # Match the same "before the first ' ('" truncation the path template
+    # applies to $media (%first{$media,1,0, (}), so this compares against
+    # what actually appears in the folder name's [] segment.
+    media_shown = media.split(' (', 1)[0].strip()
+    if disambig and media_shown and disambig.lower() == media_shown.lower():
+        return ''
+    return disambig
+
 # Keyword -> canonical category, checked in this order (most specific/
 # aliases first) against the lowercased filename. Anything unmatched
 # falls back to "other".
@@ -129,6 +145,7 @@ class RoonArtworkPlugin(BeetsPlugin):
         self.register_listener('write', self.write_version_tag)
         self.template_fields['formatcode'] = format_code
         self.template_fields['discprefix'] = disc_prefix
+        self.template_fields['distinctdisambig'] = distinct_disambig
         self.add_media_field('version', mediafile.MediaField(
             mediafile.MP3DescStorageStyle(desc='VERSION'),
             mediafile.StorageStyle('VERSION'),
