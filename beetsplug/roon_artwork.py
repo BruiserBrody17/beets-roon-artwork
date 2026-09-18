@@ -105,11 +105,28 @@ def compose_version(media, disambig):
     return ' | '.join(p for p in (media, disambig) if p)
 
 
+def smart_title(text):
+    # Like beets' own %title{} (string.capwords), but preserves words
+    # that are already all-caps in the source (e.g. "US", "UK", "SACD")
+    # instead of lowercasing them to "Us"/"Uk"/"Sacd". origin.yaml Edition
+    # text is free-form, so acronyms like "US Pressing" show up often.
+    words = []
+    for word in text.split(' '):
+        if word.isupper() and len(word) > 1:
+            words.append(word)
+        else:
+            words.append(word[:1].upper() + word[1:].lower())
+    return ' '.join(words)
+
+
 def distinct_disambig(item):
     # albumdisambig, but suppressed when it's redundant with the [media]
     # path segment (e.g. both "SACD") -- beets' path templates have no
     # native string-equality comparison, so this is computed here rather
-    # than with %if{}.
+    # than with %if{}. Also applies smart_title() here (see above) and
+    # returns it pre-formatted -- the path template uses $distinctdisambig
+    # directly, without wrapping it in %title{}, since that would undo
+    # the acronym preservation.
     disambig = (item.albumdisambig or '').strip()
     media = (item.media or '').strip()
     # Match the same "before the first ' ('" truncation the path template
@@ -118,7 +135,7 @@ def distinct_disambig(item):
     media_shown = media.split(' (', 1)[0].strip()
     if disambig and media_shown and disambig.lower() == media_shown.lower():
         return ''
-    return disambig
+    return smart_title(disambig) if disambig else disambig
 
 # Keyword -> canonical category, checked in this order (most specific/
 # aliases first) against the lowercased filename. Anything unmatched
