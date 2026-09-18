@@ -172,10 +172,31 @@ class RoonArtworkPlugin(BeetsPlugin):
                 displayable_path(item.path),
             )
 
-    def _find_source_artwork_dir(self, task):
+    def _candidate_dirs(self, task):
+        """Directories to search for source art: the common parent of
+        task.paths first (for multi-disc albums, task.paths is each disc's
+        own directory -- e.g. "Disc 1"/"Disc 2" -- so a shared Artwork/
+        scans/ folder sitting at the album's top level, a sibling of both
+        disc folders, would otherwise never be found), then each
+        individual path.
+        """
         if not task.paths:
-            return None
+            return []
+        dirs = []
+        if len(task.paths) > 1:
+            try:
+                common = os.path.commonpath(task.paths)
+                if common:
+                    dirs.append(common)
+            except ValueError:
+                pass
         for path in task.paths:
+            if path not in dirs:
+                dirs.append(path)
+        return dirs
+
+    def _find_source_artwork_dir(self, task):
+        for path in self._candidate_dirs(task):
             if not os.path.isdir(syspath(path)):
                 continue
             for entry in os.listdir(syspath(path)):
@@ -190,9 +211,7 @@ class RoonArtworkPlugin(BeetsPlugin):
         albums with no Artwork/scans/etc. subfolder at all -- just a lone
         cover.jpg/folder.jpg/whatever alongside the tracks. Returns
         (source_dir, [filenames]) or (None, [])."""
-        if not task.paths:
-            return None, []
-        for path in task.paths:
+        for path in self._candidate_dirs(task):
             if not os.path.isdir(syspath(path)):
                 continue
             images = []
