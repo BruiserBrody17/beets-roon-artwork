@@ -27,6 +27,7 @@ import os
 import shutil
 
 import mediafile
+import mutagen
 import requests
 from mutagen.flac import FLAC
 
@@ -119,6 +120,7 @@ class RoonArtworkPlugin(BeetsPlugin):
         self.register_listener('write', self.write_version_tag)
         self.template_fields['formatcode'] = format_code
         self.add_media_field('version', mediafile.MediaField(
+            mediafile.MP3DescStorageStyle(desc='VERSION'),
             mediafile.StorageStyle('VERSION'),
         ))
         self.config.add({'fetch_caa_art': True})
@@ -142,20 +144,33 @@ class RoonArtworkPlugin(BeetsPlugin):
         for item in task.items:
             path = syspath(item.path)
             try:
-                f = FLAC(path)
+                f = mutagen.File(path)
             except Exception as exc:
                 self._log.warning(
                     'roon_artwork: could not open {} to strip art: {}',
                     displayable_path(item.path), exc,
                 )
                 continue
-            if f.pictures:
+            if f is None:
+                continue
+
+            if isinstance(f, FLAC):
+                if not f.pictures:
+                    continue
                 f.clear_pictures()
-                f.save()
-                self._log.info(
-                    'roon_artwork: stripped embedded art from {}',
-                    displayable_path(item.path),
-                )
+            elif f.tags is not None and hasattr(f.tags, 'getall'):
+                # ID3-based tags (DSF, MP3, ...): pictures are APIC frames.
+                if not f.tags.getall('APIC'):
+                    continue
+                f.tags.delall('APIC')
+            else:
+                continue
+
+            f.save()
+            self._log.info(
+                'roon_artwork: stripped embedded art from {}',
+                displayable_path(item.path),
+            )
 
     def _find_source_artwork_dir(self, task):
         if not task.paths:
