@@ -41,6 +41,7 @@ IMAGE_EXTENSIONS = {b'jpg', b'jpeg', b'png', b'webp'}
 ARTWORK_DIR_NAMES = {'artwork', 'scans', 'scan', 'covers', 'cover', 'images'}
 
 CAA_URL = 'https://coverartarchive.org/release/{}'
+CAA_RELEASE_GROUP_URL = 'https://coverartarchive.org/release-group/{}'
 CAA_USER_AGENT = 'beets-roon-artwork/0.1 ( local beets plugin, no contact )'
 CAA_CONTENT_TYPE_EXT = {
     'image/jpeg': b'jpg',
@@ -377,6 +378,24 @@ class RoonArtworkPlugin(BeetsPlugin):
         if self.config['fetch_caa_art'].get(bool):
             self._add_caa_art(task, dest_artwork, counters, sizes_by_category)
 
+    def _fetch_caa_images(self, url):
+        try:
+            resp = requests.get(
+                url,
+                headers={'User-Agent': CAA_USER_AGENT},
+                timeout=10,
+            )
+            if resp.status_code == 404:
+                return []
+            resp.raise_for_status()
+            return resp.json().get('images', [])
+        except (requests.RequestException, ValueError) as exc:
+            self._log.warning(
+                'roon_artwork: could not reach Cover Art Archive ({}): {}',
+                url, exc,
+            )
+            return []
+
     def _add_caa_art(self, task, dest_artwork, counters, sizes_by_category):
         # Categories with zero local coverage: CAA becomes the canonical
         # (unprefixed) source for these, so e.g. front-01 reliably exists
@@ -385,24 +404,25 @@ class RoonArtworkPlugin(BeetsPlugin):
         # category already has local coverage, CAA images only supplement
         # it and get the CAA- prefix to stay distinguishable.
         locally_covered = set(counters)
-        mbid = task.items[0].get('mb_albumid') if task.items else None
+        if not task.items:
+            return
+        mbid = task.items[0].get('mb_albumid')
         if not mbid:
             return
 
-        try:
-            resp = requests.get(
-                CAA_URL.format(mbid),
-                headers={'User-Agent': CAA_USER_AGENT},
-                timeout=10,
-            )
-            if resp.status_code == 404:
-                return
-            resp.raise_for_status()
-            caa_images = resp.json().get('images', [])
-        except (requests.RequestException, ValueError) as exc:
-            self._log.warning(
-                'roon_artwork: could not reach Cover Art Archive: {}', exc,
-            )
+        caa_images = self._fetch_caa_images(CAA_URL.format(mbid))
+        if not caa_images:
+            # Nothing for this specific release -- try the release group
+            # instead. CAA's release-group endpoint redirects to whichever
+            # release in the group actually has art (often a different
+            # pressing/edition of the same album), which is still a much
+            # better fallback than no cover at all.
+            releasegroup_id = task.items[0].get('mb_releasegroupid')
+            if releasegroup_id:
+                caa_images = self._fetch_caa_images(
+                    CAA_RELEASE_GROUP_URL.format(releasegroup_id)
+                )
+        if not caa_images:
             return
 
         made_dir = os.path.isdir(syspath(dest_artwork))
