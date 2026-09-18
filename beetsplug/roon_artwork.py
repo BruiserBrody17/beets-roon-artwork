@@ -92,6 +92,19 @@ def disc_prefix(item):
     return ''
 
 
+def compose_version(media, disambig):
+    # "{media} | {albumdisambig}", but collapsed to just one side when
+    # they're the same value (e.g. media=SACD, albumdisambig=SACD would
+    # otherwise write "SACD | SACD") -- same rationale as
+    # distinct_disambig() below, applied to the VERSION tag instead of
+    # the path.
+    media = (media or '').strip()
+    disambig = (disambig or '').strip()
+    if media and disambig and media.lower() == disambig.lower():
+        return media
+    return ' | '.join(p for p in (media, disambig) if p)
+
+
 def distinct_disambig(item):
     # albumdisambig, but suppressed when it's redundant with the [media]
     # path segment (e.g. both "SACD") -- beets' path templates have no
@@ -157,13 +170,18 @@ class RoonArtworkPlugin(BeetsPlugin):
         self.build_artwork_folder(task)
 
     def write_version_tag(self, item, path, tags):
-        # media/albumdisambig already resolve origin data over MusicBrainz's
-        # own (via originquery), falling back to MusicBrainz alone when no
-        # origin file exists -- reuse that resolved state as-is.
-        parts = [p for p in (item.get('media'), item.get('albumdisambig')) if p]
-        if not parts:
-            return
-        version = ' | '.join(parts)
+        # originquery prompts (when running interactively, and only when
+        # MB and origin data genuinely disagree) for which source should
+        # win for VERSION specifically; respect that if present.
+        version = item.get('version_choice')
+        if not version:
+            # media/albumdisambig already resolve origin data over
+            # MusicBrainz's own (via originquery), falling back to
+            # MusicBrainz alone when no origin file exists -- reuse that
+            # resolved state as-is.
+            version = compose_version(item.get('media'), item.get('albumdisambig'))
+            if not version:
+                return
         item['version'] = version
         tags['version'] = version
 
