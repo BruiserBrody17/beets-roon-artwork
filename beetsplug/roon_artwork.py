@@ -62,14 +62,24 @@ def _configured_perm(kind):
         return None
 
 
-def _chmod_if_configured(path, kind):
+def _chmod_if_configured(path, kind, log=None):
     perm = _configured_perm(kind)
     if perm is None:
         return
     try:
         os.chmod(path, perm)
-    except OSError:
-        pass
+    except OSError as exc:
+        # Most likely cause: this file/dir is owned by a different
+        # PUID/PGID than the one currently running (e.g. an env var
+        # changed between when this file was created and now) -- only
+        # the owner or root can chmod, so this silently fails otherwise.
+        # Failing loudly here at least makes that diagnosable instead of
+        # leaving some files inexplicably at the wrong permissions.
+        if log is not None:
+            log.warning(
+                'roon_artwork: could not chmod {} to {}: {}',
+                displayable_path(path), oct(perm), exc,
+            )
 
 # Source subdirectory names (case-insensitive) recognized as holding
 # artwork to process, beyond the canonical "Artwork".
@@ -257,10 +267,10 @@ class RoonArtworkPlugin(BeetsPlugin):
         except OSError as exc:
             self._log.warning('Could not carry Artwork folder to new location: {0}'.format(exc))
             return
-        _chmod_if_configured(syspath(new_artwork), 'dir')
+        _chmod_if_configured(syspath(new_artwork), 'dir', log=self._log)
         for entry in os.listdir(syspath(new_artwork)):
             _chmod_if_configured(
-                os.path.join(syspath(new_artwork), entry), 'file'
+                os.path.join(syspath(new_artwork), entry), 'file', log=self._log
             )
 
     def write_version_tag(self, item, path, tags):
@@ -413,7 +423,7 @@ class RoonArtworkPlugin(BeetsPlugin):
                 categorized[0] = (fn0, 'front')
 
             os.makedirs(syspath(dest_artwork), exist_ok=True)
-            _chmod_if_configured(syspath(dest_artwork), 'dir')
+            _chmod_if_configured(syspath(dest_artwork), 'dir', log=self._log)
             for fn, category in categorized:
                 counters[category] = counters.get(category, 0) + 1
                 ext = fn.rsplit(b'.', 1)[-1].lower()
@@ -421,7 +431,7 @@ class RoonArtworkPlugin(BeetsPlugin):
                 src = os.path.join(source_dir, fn)
                 dst = os.path.join(dest_artwork, new_name)
                 shutil.copyfile(syspath(src), syspath(dst))
-                _chmod_if_configured(syspath(dst), 'file')
+                _chmod_if_configured(syspath(dst), 'file', log=self._log)
                 sizes_by_category.setdefault(category, set()).add(
                     os.path.getsize(syspath(dst))
                 )
@@ -512,7 +522,7 @@ class RoonArtworkPlugin(BeetsPlugin):
             )
             if not made_dir:
                 os.makedirs(syspath(dest_artwork), exist_ok=True)
-                _chmod_if_configured(syspath(dest_artwork), 'dir')
+                _chmod_if_configured(syspath(dest_artwork), 'dir', log=self._log)
                 made_dir = True
 
             if category in locally_covered:
@@ -526,7 +536,7 @@ class RoonArtworkPlugin(BeetsPlugin):
             dst = os.path.join(dest_artwork, new_name)
             with open(syspath(dst), 'wb') as f:
                 f.write(content)
-            _chmod_if_configured(syspath(dst), 'file')
+            _chmod_if_configured(syspath(dst), 'file', log=self._log)
             sizes_by_category.setdefault(category, set()).add(len(content))
             self._log.info(
                 'roon_artwork: added CAA image -> {}',
