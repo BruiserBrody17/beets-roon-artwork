@@ -84,6 +84,17 @@ def format_code(item):
     return FORMAT_CODES.get(item.format, item.format)
 
 
+def is_soundtrack(item):
+    # beets' path templates have no native list-membership test, so this
+    # is computed here rather than with %if{}. albumtypes is a multi-value
+    # field -- a real Python list via attribute access, even though it
+    # displays/stores as a "; "-joined string -- MB files soundtracks
+    # under primary type Album with a Soundtrack secondary type, not as
+    # their own primary type.
+    types = [t.strip().lower() for t in (item.albumtypes or [])]
+    return '1' if 'soundtrack' in types else ''
+
+
 def disc_prefix(item):
     # "02-" for track 1 of a 2+ disc release; "" for single-disc albums.
     # beets' path templates have no native numeric comparison, so this is
@@ -184,6 +195,7 @@ class RoonArtworkPlugin(BeetsPlugin):
         self.template_fields['formatcode'] = format_code
         self.template_fields['discprefix'] = disc_prefix
         self.template_fields['distinctdisambig'] = distinct_disambig
+        self.template_fields['is_soundtrack'] = is_soundtrack
         self.add_media_field('version', mediafile.MediaField(
             mediafile.MP3DescStorageStyle(desc='VERSION'),
             mediafile.StorageStyle('VERSION'),
