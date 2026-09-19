@@ -6,5 +6,5 @@ setuptools.setup(
     description="Strips embedded art and copies a source Artwork/ folder into "
                  "the destination, renamed to Roon's <category>-NN convention",
     packages=["beetsplug"],
-    install_requires=["beets", "mutagen", "mediafile", "requests"],
+    install_requires=["beets", "mutagen", "mediafile", "requests", "confuse"],
 )

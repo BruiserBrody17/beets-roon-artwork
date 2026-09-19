@@ -26,15 +26,50 @@ stripping needs to run after that, not before.
 import os
 import shutil
 
+import confuse
 import mediafile
 import mutagen
 import requests
 from mutagen.flac import FLAC
 
+from beets import config
 from beets.plugins import BeetsPlugin
 from beets.util import bytestring_path, displayable_path, syspath
 
 IMAGE_EXTENSIONS = {b'jpg', b'jpeg', b'png', b'webp'}
+
+
+def _configured_perm(kind):
+    """Mirror beets' own permissions plugin config (permissions.file/dir).
+    The Artwork folder and its contents aren't tracked by beets as library
+    items or album art (album.artpath stays empty in this setup, since
+    fetchart/embedart aren't used), so the permissions plugin's own hooks
+    never see them -- they only ever get whatever the process's ambient
+    umask leaves them with. Explicitly matching the same config keeps
+    them consistent with every other file in the album directory.
+    """
+    try:
+        raw = config['permissions'][kind].get()
+    except confuse.NotFoundError:
+        return None
+    if raw is None:
+        return None
+    if isinstance(raw, int):
+        raw = str(raw)
+    try:
+        return int(raw, 8)
+    except (TypeError, ValueError):
+        return None
+
+
+def _chmod_if_configured(path, kind):
+    perm = _configured_perm(kind)
+    if perm is None:
+        return
+    try:
+        os.chmod(path, perm)
+    except OSError:
+        pass
 
 # Source subdirectory names (case-insensitive) recognized as holding
 # artwork to process, beyond the canonical "Artwork".
@@ -221,6 +256,12 @@ class RoonArtworkPlugin(BeetsPlugin):
             shutil.move(syspath(old_artwork), syspath(new_artwork))
         except OSError as exc:
             self._log.warning('Could not carry Artwork folder to new location: {0}'.format(exc))
+            return
+        _chmod_if_configured(syspath(new_artwork), 'dir')
+        for entry in os.listdir(syspath(new_artwork)):
+            _chmod_if_configured(
+                os.path.join(syspath(new_artwork), entry), 'file'
+            )
 
     def write_version_tag(self, item, path, tags):
         # originquery prompts (when running interactively, and only when
@@ -372,6 +413,7 @@ class RoonArtworkPlugin(BeetsPlugin):
                 categorized[0] = (fn0, 'front')
 
             os.makedirs(syspath(dest_artwork), exist_ok=True)
+            _chmod_if_configured(syspath(dest_artwork), 'dir')
             for fn, category in categorized:
                 counters[category] = counters.get(category, 0) + 1
                 ext = fn.rsplit(b'.', 1)[-1].lower()
@@ -379,6 +421,7 @@ class RoonArtworkPlugin(BeetsPlugin):
                 src = os.path.join(source_dir, fn)
                 dst = os.path.join(dest_artwork, new_name)
                 shutil.copyfile(syspath(src), syspath(dst))
+                _chmod_if_configured(syspath(dst), 'file')
                 sizes_by_category.setdefault(category, set()).add(
                     os.path.getsize(syspath(dst))
                 )
@@ -469,6 +512,7 @@ class RoonArtworkPlugin(BeetsPlugin):
             )
             if not made_dir:
                 os.makedirs(syspath(dest_artwork), exist_ok=True)
+                _chmod_if_configured(syspath(dest_artwork), 'dir')
                 made_dir = True
 
             if category in locally_covered:
@@ -482,6 +526,7 @@ class RoonArtworkPlugin(BeetsPlugin):
             dst = os.path.join(dest_artwork, new_name)
             with open(syspath(dst), 'wb') as f:
                 f.write(content)
+            _chmod_if_configured(syspath(dst), 'file')
             sizes_by_category.setdefault(category, set()).add(len(content))
             self._log.info(
                 'roon_artwork: added CAA image -> {}',
