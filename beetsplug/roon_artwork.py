@@ -455,7 +455,11 @@ class RoonArtworkPlugin(BeetsPlugin):
             resp.raise_for_status()
             return resp.json().get('images', [])
         except (requests.RequestException, ValueError) as exc:
-            self._log.warning(
+            # CAA/archive.org has occasional transient 500s on its backing
+            # storage -- debug, not warning, so a rough patch (or a big
+            # batch import hitting it repeatedly) doesn't spam normal
+            # import output. Still fully visible with -vv.
+            self._log.debug(
                 'roon_artwork: could not reach Cover Art Archive ({}): {}',
                 url, exc,
             )
@@ -503,7 +507,10 @@ class RoonArtworkPlugin(BeetsPlugin):
                 )
                 img_resp.raise_for_status()
             except requests.RequestException as exc:
-                self._log.warning(
+                # Same reasoning as _fetch_caa_images above: a transient
+                # CAA/archive.org failure per image shouldn't spam normal
+                # import output.
+                self._log.debug(
                     'roon_artwork: could not download {}: {}', url, exc,
                 )
                 continue
