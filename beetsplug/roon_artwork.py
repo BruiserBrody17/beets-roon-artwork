@@ -176,6 +176,23 @@ def smart_title(text):
     return ' '.join(words)
 
 
+# beets' %title{} (string.capwords) can't know "ep" should stay all-caps --
+# it just title-cases each word, giving "Ep". MusicBrainz's primary/secondary
+# album types are a fixed, known vocabulary (unlike free-form Edition text,
+# where smart_title()'s "preserve what's already upper in the source" trick
+# applies instead), so this is a direct lookup rather than a heuristic.
+ALBUMTYPE_DISPLAY = {
+    'ep': 'EP',
+}
+
+
+def albumtype_display(item):
+    albumtype = (item.albumtype or '').strip()
+    if not albumtype:
+        return albumtype
+    return ALBUMTYPE_DISPLAY.get(albumtype.lower(), smart_title(albumtype))
+
+
 def distinct_disambig(item):
     # albumdisambig, but suppressed when it's redundant with the [media]
     # path segment (e.g. both "SACD") -- beets' path templates have no
@@ -241,6 +258,7 @@ class RoonArtworkPlugin(BeetsPlugin):
         self.template_fields['discprefix'] = disc_prefix
         self.template_fields['distinctdisambig'] = distinct_disambig
         self.template_fields['is_soundtrack'] = is_soundtrack
+        self.template_fields['albumtype_display'] = albumtype_display
         self.add_media_field('version', mediafile.MediaField(
             mediafile.MP3DescStorageStyle(desc='VERSION'),
             mediafile.StorageStyle('VERSION'),
