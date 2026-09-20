@@ -430,7 +430,22 @@ class RoonArtworkPlugin(BeetsPlugin):
                 new_name = f'{category}-{counters[category]:02d}.'.encode() + ext
                 src = os.path.join(source_dir, fn)
                 dst = os.path.join(dest_artwork, new_name)
-                shutil.copyfile(syspath(src), syspath(dst))
+                try:
+                    shutil.copyfile(syspath(src), syspath(dst))
+                except shutil.SameFileError:
+                    # beet import -L retags items already in the library --
+                    # source_dir and dest_artwork can then be the exact
+                    # same directory (nothing to copy, it's already
+                    # correctly in place), unlike a normal import where
+                    # the source is always a separate /music/incoming
+                    # directory. Unhandled, this crashed the whole import.
+                    pass
+                except OSError as exc:
+                    self._log.warning(
+                        'roon_artwork: could not copy {} -> {}: {}',
+                        displayable_path(src), displayable_path(dst), exc,
+                    )
+                    continue
                 _chmod_if_configured(syspath(dst), 'file', log=self._log)
                 sizes_by_category.setdefault(category, set()).add(
                     os.path.getsize(syspath(dst))
